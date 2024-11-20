@@ -79,3 +79,4 @@ class STTVS_Solve:
 
     def writeLPFile(self, filename):
         self.__model.writeLP(filename)
+
