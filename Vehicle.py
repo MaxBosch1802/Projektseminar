@@ -12,7 +12,7 @@ class Vehicle:
         return self.__id
 
     def getType(self):
-        return self.__typ
+        return self.__type
 
     def getUsageCost(self):
         return self.__usageCost
@@ -31,9 +31,8 @@ class CombustionVehicle(Vehicle):
 
 class ElectricVehicle(Vehicle):
 
-    def __init__(self, ID, typ, uc, pioc, num, auto, maxCT, minCT):
+    def __init__(self, ID, typ, uc, pioc, auto, maxCT, minCT):
         Vehicle.__init__(self, ID, typ, uc, pioc)
-        self.__number = num
         self.__autonomy = auto
         self.__maxChargingTime = maxCT
         self.__minChargingTime = minCT
@@ -46,7 +45,4 @@ class ElectricVehicle(Vehicle):
 
     def getAutonomy(self):
         return self.__autonomy
-
-    def getNumger(self):
-        return self.__number
 
