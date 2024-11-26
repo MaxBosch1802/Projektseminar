@@ -2,6 +2,10 @@
 
 # Sven Mallach (2024)
 
+#!/usr/bin/python3
+
+# Sven Mallach (2024)
+
 import sys
 import os
 import json
@@ -14,13 +18,8 @@ from Vehicle import CombustionVehicle, ElectricVehicle
 from SeniorTTVS import SeniorTTVS
 from STTVS_Solve import STTVS_Solve
 
-if __name__ == '__main__':
+def parse(filename):
 
-    if len(sys.argv) < 2:
-        print("Missing argument(s). Usage: ./sttvs.py <json instance file>")
-        exit(0)
-
-    filename = sys.argv[1]
     with open(filename, "r") as f_in:
         data = json.load(f_in)
 
@@ -107,9 +106,10 @@ if __name__ == '__main__':
                 pioc = float(vehicleset2["pullInOutCost"])
                 ec = float(vehicleset2["iceInfo"]["emissionCoefficient"])
 
-                cv = CombustionVehicle(vehicleid, "ICE", ucost, pioc, ec)
-                fleet.append(cv)
-                vehicleid = vehicleid + 1
+                for d in range(0, 4 * len(dirs)):
+                    cv = CombustionVehicle(vehicleid, "ICE", ucost, pioc, ec)
+                    fleet.append(cv)
+                    vehicleid = vehicleid + 1
             else:
                 ucost = int(vehicleset2["usageCost"])
                 pioc = float(vehicleset2["pullInOutCost"])
@@ -118,16 +118,31 @@ if __name__ == '__main__':
                 minCT = int(vehicleset2["electricInfo"]["maxChargingTime"])
                 maxCT = int(vehicleset2["electricInfo"]["minChargingTime"])
 
-                ev = ElectricVehicle(vehicleid, "electric", ucost, pioc, enum, auto, minCT, maxCT)
-                fleet.append(ev)
-                vehicleid = vehicleid + 1
+                for d in range(0, enum):
+                    ev = ElectricVehicle(vehicleid, "electric", ucost, pioc, auto, minCT, maxCT)
+                    fleet.append(ev)
+                    vehicleid = vehicleid + 1
         phi = float(data["fleet"]["phi"])
         bCC = float(data["globalCost"]["breakCostCoefficient"])
 
         problem = SeniorTTVS(phi, bCC, nodes, arcs, dirs, times, fleet)
 
-        solver = STTVS_Solve(problem)
+        return problem
 
-        solver.generateVariables()
-        solver.generateConstraints()
+if __name__ == '__main__':
 
+    if len(sys.argv) < 2:
+        print("Missing argument(s). Usage: ./sttvs.py <json instance file>")
+        exit(0)
+
+    filename = sys.argv[1]
+
+    problem = parse(filename)
+
+    solver = STTVS_Solve(problem)
+
+    solver.generateVariables()
+
+    solver.generateConstraints()
+
+    solver.solve()
