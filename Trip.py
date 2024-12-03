@@ -2,12 +2,12 @@
 
 class Trip:
 
-    def __init__(self, ID, sT, eT, ell, mSAT, initfin):
+    def __init__(self, ID, sT, eT, mSAT, ell, initfin):
         self.__id = ID
         self.__startTime = sT
         self.__endTime = eT
-        self.__length = ell
         self.__mainStopArrivalTime = mSAT
+        self.__length = ell
         self.__initialFinal = initfin
 
     def getID(self):
@@ -27,3 +27,5 @@ class Trip:
 
     def getInitialFinal(self):
         return self.__initialFinal
+
+
