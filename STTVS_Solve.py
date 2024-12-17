@@ -72,10 +72,6 @@ class STTVS_Solve:
 
                     for t in d.getTrips():
                         if t.getInitialFinal() != "initial":
-                            # if (0 < t.getMainStopArrivalTime() - s.getMainStopArrivalTime() < IJmax and  # Condition from constraint (3)
-                            #     (t.getTimeWindowIndex() == s.getTimeWindowIndex() or 
-                            #     t.getTimeWindowIndex() == s.getTimeWindowIndex() + 1)):  # Time window condition
-                            #     lhs.append((self.xvars[t.getID()], 1.0)) 
                             if (0 < t.getMainStopArrivalTime() - s.getMainStopArrivalTime() < IJmax):
                                 lhs.append((self.xvars[t.getID()], 1.0)) 
                     con = pulp.LpConstraint(e=pulp.LpAffineExpression(lhs),sense=pulp.LpConstraintGE,rhs=0)
@@ -93,16 +89,27 @@ class STTVS_Solve:
                 con = pulp.LpConstraint(e=pulp.LpAffineExpression(lhs),sense=pulp.LpConstraintEQ, rhs=0)    
                 self.model += con
 
-        # #Constraint (8): Link z_tv and y_v variables
+        # Constraint (10) 
         for d in dirs:
-            trips = d.getTrips()
-            for i in range(len(trips) - 1):  # Iterate up to the second-to-last trip
-                for j in range(i + 1, len(trips)):  # Iterate from i+1 to the end
-                    if trips[j] in self.getIncompatibleSuccessorTrips(d, trips[i]) or trips[i] in self.getIncompatibleSuccessorTrips(d, trips[j]):
-                        for v in range(len(self.sttvs.getFleet())):
-                            con = pulp.LpConstraint(e=pulp.LpAffineExpression([(self.zvars[(trips[i].getID(), v)], 1.0), (self.zvars[(trips[j].getID(), v)], 1.0)]),sense=pulp.LpConstraintLE,rhs=1)                                                                                           
-                            self.model += con
-        print("TODO")
+            for i, trip_i in enumerate(d.getTrips()):
+                incompatible_trips = self.getIncompatibleSuccessorTrips(d, trip_i)
+                if incompatible_trips:
+                    num_incompatible = len(incompatible_trips)
+                    for v in range(len(self.sttvs.getFleet())):
+                        lhs = [(self.zvars[(trip_i.getID(), v)], num_incompatible)]  # z_iv * |T_i^{ips}|
+                        for trip_j in incompatible_trips:
+                            lhs.append((self.zvars[(trip_j.getID(), v)], 1.0))  # Add z_jv
+
+                        con = pulp.LpConstraint(e=pulp.LpAffineExpression(lhs),sense=pulp.LpConstraintLE,rhs=num_incompatible)   
+                        self.model += con
+        
+        # Constraint (11)
+        neg_total_trips = sum(len(d.getTrips()) for d in self.sttvs.getDirections())*(-1)
+
+        for v in range(len(self.sttvs.getFleet())):             
+            lhs = [(self.yvars[v],neg_total_trips)]  # -|T| * y_v
+            con = pulp.LpConstraint(e=pulp.LpAffineExpression(lhs),sense=pulp.LpConstraintLE,rhs=0) 
+            self.model += con
 
     def time2window(self, time):
         timeH = self.sttvs.getTimeHorizon()
@@ -113,44 +120,43 @@ class STTVS_Solve:
         return twidx
 
     def getIncompatibleSuccessorTrips(self, d, s):
-        dirs = self.sttvs.getDirections()
-        timeH = self.sttvs.getTimeHorizon()
+            dirs = self.sttvs.getDirections()
+            timeH = self.sttvs.getTimeHorizon()
 
-        msat = s.getMainStopArrivalTime()
-        twidx = self.time2window(msat) 
+            msat = s.getMainStopArrivalTime()
+            twidx = self.time2window(msat)  
+            minmaxstop = self.sttvs.getNodeByID(d.getEndNode()).getMinMaxStoppingTimes(twidx)
+            enat = s.getEndTime()
+            twidx_en = self.time2window(enat)
+            depotminstop = self.sttvs.getNodeByID(0).getMinMaxStoppingTimes(twidx_en)[0]
 
-        minmaxstop = self.sttvs.getNodeByID(d.getEndNode()).getMinMaxStoppingTimes(twidx)
-        enat = s.getEndTime()
-        twidx_en = self.time2window(enat)
-        depotminstop = self.sttvs.getNodeByID(0).getMinMaxStoppingTimes(twidx_en)[0]
+            pullintime = 0
+            for arc in self.sttvs.getDeadheadArcs():
+                if arc.getTerminalNode() == d.getEndNode() and arc.getType() == "in":
+                    pullintime = arc.getTravelTime(twidx_en)
+                    break
 
-        pullintime = 0
-        for arc in self.sttvs.getDeadheadArcs():
-            if arc.getTerminalNode() == d.getEndNode() and arc.getType() == "in":
-                pullintime = arc.getTravelTime(twidx_en)
-                break
+            incompatible_s = []
+            for e in dirs:
+                if d.getEndNode() == e.getStartNode():
+                    for t in e.getTrips():
+                        if ((t.getStartTime() - s.getEndTime() >= 0 and t.getStartTime() - s.getEndTime() < minmaxstop[0]) or
+                                (t.getStartTime() - s.getEndTime() > minmaxstop[1])):
+                            incompatible_s.append(t)
+                else:
+                    if e == d:
+                        continue
+                    for t in e.getTrips():
+                        pulloutime = 0
+                        for arc in self.sttvs.getDeadheadArcs():
+                            if arc.getTerminalNode() == e.getStartNode() and arc.getType() == "out":
+                                pullouttime = arc.getTravelTime(twidx_en)
+                                break
 
-        incompatible_s = []
-        for e in dirs:
-            if d.getEndNode() == e.getStartNode():
-                for t in e.getTrips():
-                    if ((t.getStartTime() - s.getEndTime() >= 0 and t.getStartTime() - s.getEndTime() < minmaxstop[0]) or
-                            (t.getStartTime() - s.getEndTime() > minmaxstop[1])):
-                        incompatible_s.append(t)
-            else:
-                if e == d:
-                    continue
-                for t in e.getTrips():
-                    pulloutime = 0
-                    for arc in self.sttvs.getDeadheadArcs():
-                        if arc.getTerminalNode() == e.getStartNode() and arc.getType() == "out":
-                            pullouttime = arc.getTravelTime(twidx_en)
-                            break
+                        if (0 <= t.getStartTime() - s.getEndTime() < pullintime + depotminstop + pullouttime):
+                            incompatible_s.append(t)
 
-                    if (0 <= t.getStartTime() - s.getEndTime() < pullintime + depotminstop + pullouttime):
-                        incompatible_s.append(t)
-
-        return incompatible_s
+            return incompatible_s
 
     def generateObjectiveFunction(self):
         # Objective function: Minimize the sum of chosen trips and vehicles
@@ -160,19 +166,20 @@ class STTVS_Solve:
         # Add x variables (trips) to the objective function
         for d in self.sttvs.getDirections():
             for t in d.getTrips():
-                obj.append((self.xvars[t.getID()], 1.0))  # Assuming each trip has a cost/value of 1
+                obj.append((self.xvars[t.getID()], 1.0)) 
 
         # Add y variables (vehicles) to the objective function
         for v in range(len(self.sttvs.getFleet())):
-            obj.append((self.yvars[v], 1.0))  # Assuming each vehicle has a cost/value of 1
+            obj.append((self.yvars[v], 1.0))  
 
-        self.model += pulp.LpAffineExpression(obj)  # Set the objective function  
+        self.model += pulp.LpAffineExpression(obj) 
 
     def solve(self):
-        self.model.solve()
+        gurobi_path = '/Users/maxbosch/tutorial-env/bin'
+        self.model.solve(pulp.GUROBI_CMD(path=gurobi_path))
         # Print the status of the model
         print("Status:", pulp.LpStatus[self.model.status])
-        print("Total Costs:", pulp.value(self.model.objective)) 
+        #print("Total Costs:", pulp.value(self.model.objective)) 
 
         # Print the chosen x, y, and z variables
         # print("Chosen trips (x):")
@@ -194,5 +201,5 @@ class STTVS_Solve:
         #                 print(f"  - Trip {t.getID()} assigned to Vehicle {v}")
 
     def writeLPFile(self, filename):
-        self.__model.writeLP(filename)
+        self.model.writeLP(filename)
         
