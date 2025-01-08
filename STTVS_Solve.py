@@ -36,26 +36,25 @@ class STTVS_Solve:
         timeH = self.sttvs.getTimeHorizon()
         dirs = self.sttvs.getDirections()
 
-        # Constraint (1): Exactly one initial trip per direction
+        # Constraint (1):
         for d in dirs:
             lhs = []
             for t in d.getTrips():
-                if t.getInitialFinal() == "initial":  # Check for trips marked as "initial"
+                if t.getInitialFinal() == "initial":  
                     lhs.append((self.xvars[t.getID()], 1.0))
             con = pulp.LpConstraint(e=pulp.LpAffineExpression(lhs),sense=pulp.LpConstraintEQ,rhs=1)
             self.model += con
 
-        #Constraint (2): Each Direction must have exaclty on final trip
-        for d in dirs:
+        #Constraint (2):
             lhs = []
             for t in d.getTrips():
-                if t.getInitialFinal() == "final":  # Check for trips marked as "final"
+                if t.getInitialFinal() == "final":  
                     lhs.append((self.xvars[t.getID()], 1.0))
             con = pulp.LpConstraint(e=pulp.LpAffineExpression(lhs),sense=pulp.LpConstraintEQ,rhs=1)
             self.model += con
         
 
-        # Constraint (3): 
+        #Constraint (3): 
         for d in dirs:
             for s in d.getTrips():
                 if s.getInitialFinal() != "final":
@@ -63,28 +62,71 @@ class STTVS_Solve:
                     twidx = -1
 
                     for i in range(1, len(timeH)):
-                        if msat > timeH[i - 1] and msat <= timeH[i]:
-                            twidx = i
+                        if msat >= timeH[i - 1] and msat < timeH[i]:
+                            twidx = i - 1
 
                     IJmax = d.getMaxHeadway(twidx - 1)
                     lhs = []
                     lhs.append((self.xvars[s.getID()], -1.0))
 
                     for t in d.getTrips():
-                        if t.getInitialFinal() != "initial":
-                            if (0 < t.getMainStopArrivalTime() - s.getMainStopArrivalTime() < IJmax):
+                        if t.getInitialFinal() != "initial" and t != s:
+                            msat_t = t.getMainStopArrivalTime()
+                            twidx_t = -1
+                            for i in range(1, len(timeH)):
+                                if msat_t >= timeH[i - 1] and msat_t < timeH[i]:
+                                    twidx_t = i - 1
+                            if twidx != twidx_t:
+                                if d.getMaxHeadway(twidx_t) > IJmax:
+                                    IJmax = d.getMaxHeadway(twidx_t) 
+
+                            if (0 <= t.getMainStopArrivalTime() - s.getMainStopArrivalTime() <= IJmax):
                                 lhs.append((self.xvars[t.getID()], 1.0)) 
                     con = pulp.LpConstraint(e=pulp.LpAffineExpression(lhs),sense=pulp.LpConstraintGE,rhs=0)
                     self.model += con
+
+        # for d in dirs:
+        #     for s in d.getTrips():
+        #         if s.getInitialFinal() != "final":
+        #             msat = s.getMainStopArrivalTime()
+        #             twidx_i = self.time2window(msat)  # Get time window index for trip i
+
+        #             lhs = []
+        #             lhs.append((self.xvars[s.getID()], -1.0))
+
+        #             for t in d.getTrips():
+        #                 if t.getInitialFinal() != "initial":
+        #                     msat_j = t.getMainStopArrivalTime()
+        #                     twidx_j = self.time2window(msat_j)  
+
+        #                     if 0 < msat_j - msat: 
+        #                         if twidx_j <= twidx_i + 1: 
+        #                             if twidx_j == twidx_i + 1:
+                                        
+        #                                 IJmax =  
+        #                             else:
+        #                                 IJmax = d.getMaxHeadway(twidx_i)
+
+        #                             if msat_j - msat <= IJmax:  
+        #                                 lhs.append((self.xvars[t.getID()], 1.0))
+
+        #             con = pulp.LpConstraint(
+        #                 e=pulp.LpAffineExpression(lhs),
+        #                 sense=pulp.LpConstraintGE,
+        #                 rhs=0)
+                        
+                    
+        #             self.model += con
+
         
         # Constraint (4): Linking x and z variables
         for d in dirs:
             for t in d.getTrips():
                 lhs = []
-                lhs.append((self.xvars[t.getID()], -1.0))  # Coefficient of -1 for x_t
+                lhs.append((self.xvars[t.getID()], -1.0)) 
 
-                for v in range(len(self.sttvs.getFleet())):  # Iterate over all vehicles
-                    lhs.append((self.zvars[(t.getID(), v)], 1.0))  # Coefficient of +1 for z_tv
+                for v in range(len(self.sttvs.getFleet())):  
+                    lhs.append((self.zvars[(t.getID(), v)], 1.0))  
 
                 con = pulp.LpConstraint(e=pulp.LpAffineExpression(lhs),sense=pulp.LpConstraintEQ, rhs=0)    
                 self.model += con
@@ -104,13 +146,18 @@ class STTVS_Solve:
                         self.model += con
         
         # Constraint (11)
-        neg_total_trips = sum(len(d.getTrips()) for d in self.sttvs.getDirections())*(-1)
+        neg_total_trips = sum(len(d.getTrips()) for d in dirs)*(-1)
 
         for v in range(len(self.sttvs.getFleet())):             
-            lhs = [(self.yvars[v],neg_total_trips)]  # -|T| * y_v
-            con = pulp.LpConstraint(e=pulp.LpAffineExpression(lhs),sense=pulp.LpConstraintLE,rhs=0) 
-            self.model += con
+            lhs = [(self.yvars[v], neg_total_trips)]  # -|T| * y_v
 
+            # Add the sum of z_tv variables
+            for d in dirs:
+                for t in d.getTrips():
+                    lhs.append((self.zvars[(t.getID(), v)], 1.0))  # Add z_tv
+
+            con = pulp.LpConstraint(e=pulp.LpAffineExpression(lhs),sense=pulp.LpConstraintLE,rhs=0)           
+            self.model += con
 
         #solver_list = pulp.listSolvers(onlyAvailable=True)
         #print(solver_list)
@@ -144,21 +191,20 @@ class STTVS_Solve:
             for e in dirs:
                 if d.getEndNode() == e.getStartNode():
                     for t in e.getTrips():
-                        if ((t.getStartTime() - s.getEndTime() >= 0 and t.getStartTime() - s.getEndTime() < minmaxstop[0]) or
-                                (t.getStartTime() - s.getEndTime() > minmaxstop[1])):
+                         if (t != s and (t.getStartTime() - s.getStartTime()) >= 0 and ((t.getStartTime() - s.getEndTime()) < minmaxstop[0])):
                             incompatible_s.append(t)
                 else:
-                    if e == d:
-                        continue
                     for t in e.getTrips():
-                        pulloutime = 0
-                        for arc in self.sttvs.getDeadheadArcs():
-                            if arc.getTerminalNode() == e.getStartNode() and arc.getType() == "out":
-                                pullouttime = arc.getTravelTime(twidx_en)
-                                break
+                            if (t != s and (t.getStartTime() - s.getStartTime()) >= 0):
+                                pullouttime = 0
+                                twidx_sn = self.time2window(t.getStartTime())
+                                for arc in self.sttvs.getDeadheadArcs():
+                                    if arc.getTerminalNode() == e.getStartNode() and arc.getType() == "out":
+                                        pullouttime = arc.getTravelTime(twidx_sn)
+                                        break
 
-                        if (0 <= t.getStartTime() - s.getEndTime() < pullintime + depotminstop + pullouttime):
-                            incompatible_s.append(t)
+                                if (t.getStartTime() - s.getEndTime()) < pullintime + depotminstop + pullouttime:
+                                    incompatible_s.append(t)
 
             return incompatible_s
 
