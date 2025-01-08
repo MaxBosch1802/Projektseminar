@@ -111,6 +111,10 @@ class STTVS_Solve:
             con = pulp.LpConstraint(e=pulp.LpAffineExpression(lhs),sense=pulp.LpConstraintLE,rhs=0) 
             self.model += con
 
+
+        #solver_list = pulp.listSolvers(onlyAvailable=True)
+        #print(solver_list)
+
     def time2window(self, time):
         timeH = self.sttvs.getTimeHorizon()
         twidx = -1
@@ -159,46 +163,62 @@ class STTVS_Solve:
             return incompatible_s
 
     def generateObjectiveFunction(self):
-        # Objective function: Minimize the sum of chosen trips and vehicles
 
         obj = []
 
-        # Add x variables (trips) to the objective function
+        # First part: Usage costs of vehicles
+        for v in range(len(self.sttvs.getFleet())):
+            c_v = self.sttvs.getFleet()[v].getUsageCost()  # Use getUsageCost() for vehicle cost
+            obj.append((self.yvars[v], c_v))  # y_v * c_v
+
+        # Second part: CO2 costs
         for d in self.sttvs.getDirections():
             for t in d.getTrips():
-                obj.append((self.xvars[t.getID()], 1.0)) 
+                duration = t.getEndTime() - t.getStartTime()
+                for v in range(len(self.sttvs.getFleet())):
+                    # Correctly check the type of vehicle
+                    if type(self.sttvs.getFleet()[v]).__name__ == "CombustionVehicle":  
+                        c_v_CO2 = self.sttvs.getFleet()[v].getEmissionCoefficient()
+                        obj.append((self.zvars[(t.getID(), v)], duration * c_v_CO2))
 
-        # Add y variables (vehicles) to the objective function
-        for v in range(len(self.sttvs.getFleet())):
-            obj.append((self.yvars[v], 1.0))  
 
-        self.model += pulp.LpAffineExpression(obj) 
+
+
+        self.model += pulp.LpAffineExpression(obj)
+        print(obj)
 
     def solve(self):
-        gurobi_path = '/Users/maxbosch/tutorial-env/bin'
-        self.model.solve(pulp.GUROBI_CMD(path=gurobi_path))
+        gurobi_path = '/Users/maxbosch/tutorial-env/gurobi1200/macos_universal2/bin/gurobi.sh'
+        #self.model.solve(pulp.GUROBI(path=gurobi_path))
+        solver = pulp.GUROBI()
+        solver.buildSolverModel(self.model)
+        solver.callSolver(self.model)
+
+
+
+
         # Print the status of the model
         print("Status:", pulp.LpStatus[self.model.status])
-        #print("Total Costs:", pulp.value(self.model.objective)) 
+        print("Total Costs:", pulp.value(self.model.objective)) 
 
-        # Print the chosen x, y, and z variables
-        # print("Chosen trips (x):")
-        # for d in self.sttvs.getDirections():
-        #     for t in d.getTrips():
-        #         if self.xvars[t.getID()].varValue == 1:
-        #             print(f"  - Trip {t.getID()} (Direction: {d.getLine()}_{d.getType()})")
+        #Print the chosen x, y, and z variables
+        print("Chosen trips (x):")
+        for d in self.sttvs.getDirections():
+            for t in d.getTrips():
+                if self.xvars[t.getID()].varValue == 1:
+                    print(f"  - Trip {t.getID()} (Direction: {d.getLine()}_{d.getType()})")
 
-        # print("Chosen vehicles (y):")
-        # for v in range(len(self.sttvs.getFleet())):
-        #     if self.yvars[v].varValue == 1:
-        #         print(f"  - Vehicle {v}")
+        print("Chosen vehicles (y):")
+        for v in range(len(self.sttvs.getFleet())):
+            if self.yvars[v].varValue == 1:
+                print(f"  - Vehicle {v}")
 
-        # print("Trip-vehicle assignments (z):")
-        # for d in self.sttvs.getDirections():
-        #     for t in d.getTrips():
-        #         for v in range(len(self.sttvs.getFleet())):
-        #             if self.zvars[(t.getID(), v)].varValue == 1:
-        #                 print(f"  - Trip {t.getID()} assigned to Vehicle {v}")
+        print("Trip-vehicle assignments (z):")
+        for d in self.sttvs.getDirections():
+            for t in d.getTrips():
+                for v in range(len(self.sttvs.getFleet())):
+                    if self.zvars[(t.getID(), v)].varValue == 1:
+                        print(f"  - Trip {t.getID()} assigned to Vehicle {v}")
 
     def writeLPFile(self, filename):
         self.model.writeLP(filename)
